@@ -327,10 +327,10 @@ def pipeline(img):
 
     full_mask = np.zeros_like(_B)
     full_mask[(_H_binary == 1) & (_S_binary == 1)| 
-                (_S_binary == 1) |
-                (_L_binary == 1) |
-                (_B_binary == 1) |
-                (_R_binary == 1)] = 1
+              (_S_binary == 1) |
+              (_L_binary == 1) |
+              (_B_binary == 1) |
+              (_R_binary == 1)] = 1
 
     if not discard_x and not discard_y:
         full_mask[((x_binary == 1) & (y_binary == 1))] = 1
@@ -341,10 +341,10 @@ def pipeline(img):
     return full_mask, (_H_binary, _S_binary, _L_binary, _B_binary, _R_binary, x_binary, y_binary, mag_binary, dir_binary)
 
 
-def new_color_spaces_tests():
+def pipeline_test():
     location = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
     dir_to_images = os.path.join(location, 'test_images')
-    dir_to_output_images = os.path.relpath(os.path.join(os.getcwd(), os.path.dirname(__file__), '../output_images/specific_sobel/'))
+    dir_to_output_images = os.path.relpath(os.path.join(os.getcwd(), os.path.dirname(__file__), '../output_images/first_pipeline_test/'))
     filenames = os.listdir(dir_to_images)
     def set_axis(row, col, img, title):
         axes[row][col].imshow(img, cmap='gray')
@@ -369,9 +369,72 @@ def new_color_spaces_tests():
             set_axis(i, 8, components[7], 'MAGNITUDE')
             set_axis(i, 9, components[8], 'DIRECTION')
             set_axis(i, 10, masked, 'FULL MASK')
-        plt.show()
+        plt.subplots_adjust(wspace=0.01, hspace=0.5, top=0.95, bottom=0.01, left=0.0, right=1.0)
+        filename = 'batch_image_{begin}-{end}.png'.format(begin=str(j+1), end=str(j+4))
+        output_image_filename = os.path.join(dir_to_output_images, os.path.splitext(filename)[0])
+        plt.savefig(output_image_filename)
+        plt.clf()
+
+
+def new_color_spaces_tests():
+    location = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+    dir_to_images = os.path.join(location, 'test_images')
+    dir_to_output_images = os.path.relpath(os.path.join(os.getcwd(), os.path.dirname(__file__), '../output_images/moar_color_testing/'))
+    filenames = os.listdir(dir_to_images)
+    def set_axis(row, col, img, title):
+        axes[row][col].imshow(img, cmap='gray')
+        axes[row][col].set_title(title)
+        axes[row][col].axis('off')
+    brightness = []
+    images = []
+    for fname in filenames:
+        path_image = os.path.join(dir_to_images, fname)
+        img = cv2.cvtColor(cv2.imread(path_image), cv2.COLOR_BGR2RGB)
+        y, x = img.shape[0], img.shape[1]
+        img = img[y//2+80:y, 0:x]
+        R_L = np.mean(img[:,:,0])
+        G_L = np.mean(img[:,:,1])
+        B_L = np.mean(img[:,:,2])
+        Y = 0.2126 * R_L + 0.7152 * G_L + 0.0722 * B_L
+        images.append((img, Y))
+    images = sorted(images, key=lambda x: x[1])
+    k = 0
+    for j in range(0, len(filenames), 4):
+        rows, cols = 4, 9
+        fig, axes = plt.subplots(rows, cols, figsize=(cols*4, rows*1.5))
+        for i, fname in enumerate(filenames[j:j+4]):
+            img, Y = images[k]
+            k += 1
+            """ COLOR SPACES TO TEST 
+                RGB2Luv, RGB2XYZ, RGB2YCrCb, RGB2LAB, RGB2HLS 
+            """
+            brightness.append(Y)
+            luv = cv2.cvtColor(img, cv2.COLOR_RGB2Luv)
+            xyz = cv2.cvtColor(img, cv2.COLOR_RGB2XYZ)
+            yuv = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
+            lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+            hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
+            
+            set_axis(i, 0, img, 'ORIGINAL {Luminance}'.format(Luminance=Y))
+            set_axis(i, 1, luv[:,:,1], 'LUV U')
+            set_axis(i, 2, luv[:,:,2], 'LUV V')
+            set_axis(i, 3, xyz[:,:,1], 'XYZ Y')
+            set_axis(i, 4, yuv[:,:,1], 'YUV U')
+            set_axis(i, 5, yuv[:,:,2], 'YUV V')
+            set_axis(i, 6, img[:,:,0], 'R')
+            set_axis(i, 7, lab[:,:,2], 'LAB B')
+            set_axis(i, 8, hls[:,:,2], 'HSL S')
+        plt.subplots_adjust(wspace=0.01, hspace=0.2, top=0.95, bottom=0.01, left=0.0, right=1.0)
+        filename = 'batch_image_{begin}-{end}.png'.format(begin=str(j+1), end=str(j+4))
+        output_image_filename = os.path.join(dir_to_output_images, os.path.splitext(filename)[0])
+        plt.savefig(output_image_filename)
+        plt.clf()
+    print(sorted(brightness))
+        
+
 
 if __name__ == '__main__':
     #search_common_values_brutally()
     #search_common_values_less_brutally()
+    #pipeline_test()
     new_color_spaces_tests()
