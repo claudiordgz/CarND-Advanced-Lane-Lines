@@ -254,121 +254,169 @@ def search_common_values_less_brutally():
         plt.clf()
 
 
-def pipeline(img):
-    """ Experiments
-    """
-    y, x = img.shape[0], img.shape[1]
-    total = x*y
-    mask = np.zeros((y, x), dtype=np.uint8)   
-    ignore_mask_color = 255
-    y1, y2 = y, y // 2 + 80
-    lower_left_corner = 40, y1
-    lower_right_corner = x - 40, y1
-    upper_left_corner = x // 4, y2
-    upper_right_corner = x - (x//4), y2
-    height = y1 - y2
-    b1 = lower_right_corner[0] - lower_left_corner[0]
-    b2 = upper_right_corner[0] - upper_left_corner[0]
-    area = ((b1 + b2) * height) / 2
-    vertices = np.array( [[lower_left_corner, 
-                            upper_left_corner, 
-                            upper_right_corner, 
-                            lower_right_corner]], dtype=np.int32)
-    cv2.fillPoly(mask, vertices, ignore_mask_color)
+def birds_eye(image_in_rgb):
+    img_size = (image_in_rgb.shape[1], image_in_rgb.shape[0])
+    offset = 0
+    src = np.float32([[490, 482],[810, 482],
+                      [1250, 720],[40, 720]])
+    dst = np.float32([[0, 0], [1280, 0], 
+                     [1250, 720],[40, 720]])
+    M = cv2.getPerspectiveTransform(src, dst)
+    warped = cv2.warpPerspective(image_in_rgb, M, img_size)
+    return warped, M
 
+
+def thresholds(img, debug=False):
+    height, width = img.shape[0], img.shape[1]
+    area = width*height
+    R_L = np.mean(img[:,:,0])
+    G_L = np.mean(img[:,:,1])
+    B_L = np.mean(img[:,:,2])
+    perceived_brightness = 0.2126 * R_L + 0.7152 * G_L + 0.0722 * B_L
+    
+    luv = cv2.cvtColor(img, cv2.COLOR_RGB2Luv)
+    yuv = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
     lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB) 
     hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(13,13))
     
-    _R = img[:,:,0]
-    _R = cv2.morphologyEx(_R, cv2.MORPH_GRADIENT, kernel)
-    _R_binary = np.zeros_like(_R)
-    _R_binary[(_R > 170) & (_R <= 255)] = 1
-    _R_binary = cv2.bitwise_and(_R_binary, mask)
-    
-    _H = hls[:,:,0]
-    _H = cv2.morphologyEx(_H, cv2.MORPH_GRADIENT, kernel)
-    _H_binary = np.zeros_like(_H)
-    _H_binary[(_H > 168) & (_H <= 255)] = 1
-    _H_binary = cv2.bitwise_and(_H_binary, mask)
+    luv_u, luv_v = luv[:,:,1], luv[:,:,2]
+    yuv_u, yuv_v = yuv[:,:,1], yuv[:,:,2]
+    lab_b = lab[:,:,2]
+    hls_s = hls[:,:,2]
+    rgb_r = img[:,:,0]
+    discard_rgb, discard_xyz = False, False
+    if perceived_brightness < 65:
+        luv_u_binary = np.zeros_like(luv_u)
+        luv_u_binary[(luv_u > np.max(luv_u) - 5)] = 1
 
-    _S = hls[:,:,2]
-    _S = cv2.morphologyEx(_S, cv2.MORPH_GRADIENT, kernel)
-    _S_binary = np.zeros_like(_S)
-    _S_binary[(_S > 200) & (_S <= 255)] = 1
-    _S_binary = cv2.bitwise_and(_S_binary, mask)
+        luv_v_binary = np.zeros_like(luv_v)
+        luv_v_binary[(luv_v > 200)] = 1
 
-    _L = lab[:,:,0]
-    _L = cv2.morphologyEx(_L, cv2.MORPH_GRADIENT, kernel)
-    _L_binary = np.zeros_like(_L)
-    _L_binary[(_L > 100) & (_L <= 255)] = 1
-    _L_binary = cv2.bitwise_and(_L_binary, mask)
+        yuv_u_binary = np.zeros_like(yuv_u)
 
-    _B = lab[:,:,2]
-    _B = cv2.morphologyEx(_B, cv2.MORPH_GRADIENT, kernel)
-    _B_binary = np.zeros_like(_B)
-    _B_binary[(_B > 20) & (_B <= 255)] = 1
-    _B_binary = cv2.bitwise_and(_B_binary, mask)
+        yuv_v_binary = np.zeros_like(yuv_v)
+        yuv_v_binary[(yuv_v >= 0) & (yuv_v <= 110)] = 1
 
-    x_binary = absolute_sobel_threshold(img, 'x', thresh=(30,130))
-    x_binary = cv2.morphologyEx(x_binary, cv2.MORPH_GRADIENT, kernel)
-    x_binary = cv2.bitwise_and(x_binary, mask)
-    discard_x = np.asarray(x_binary).sum()/area > 0.25
-    y_binary = absolute_sobel_threshold(img, 'y', thresh=(30,130))
-    y_binary = cv2.morphologyEx(y_binary, cv2.MORPH_GRADIENT, kernel)
-    y_binary = cv2.bitwise_and(y_binary, mask)
-    discard_y = np.asarray(y_binary).sum()/area > 0.25
-    mag_binary = magnitude_threshold(img, thresh=(30,130))
-    mag_binary = cv2.morphologyEx(mag_binary, cv2.MORPH_GRADIENT, kernel)
-    mag_binary = cv2.bitwise_and(mag_binary, mask)
-    discard_mag = np.asarray(mag_binary).sum()/area > 0.25
-    
-    dir_binary = direction_threshold(img)
+        lab_b_binary = np.zeros_like(lab_b)
+        lab_b_binary[(lab_b >= 160)] = 1
 
-    full_mask = np.zeros_like(_B)
-    full_mask[(_H_binary == 1) & (_S_binary == 1)| 
-              (_S_binary == 1) |
-              (_L_binary == 1) |
-              (_B_binary == 1) |
-              (_R_binary == 1)] = 1
+        hls_s_binary = np.zeros_like(hls_s)
+        hls_s_binary[(hls_s > 15) & (hls_s <= 24)] = 1
 
-    if not discard_x and not discard_y:
-        full_mask[((x_binary == 1) & (y_binary == 1))] = 1
-    
-    if not discard_mag:
-        full_mask[((mag_binary == 1) & (dir_binary == 1))] = 1             
-    
-    return full_mask, (_H_binary, _S_binary, _L_binary, _B_binary, _R_binary, x_binary, y_binary, mag_binary, dir_binary)
+        rgb_r_binary = np.zeros_like(rgb_r)
+        rgb_r_binary[(rgb_r == 22) | (rgb_r >= 200)] = 1
+
+        full_mask = np.zeros_like(rgb_r)
+        full_mask[(luv_u_binary == 1) | 
+                  (luv_v_binary == 1) |
+                  (lab_b_binary == 1) |
+                  (rgb_r_binary == 1)] = 1
+        
+        full_mask = cv2.morphologyEx(full_mask, cv2.MORPH_GRADIENT, kernel)
+        full_mask[(yuv_v_binary == 1) |
+                  (hls_s_binary == 1)] = 1
+    else:
+
+        luv_u_binary = np.zeros_like(luv_u)
+        luv_u_binary[(luv_u >= 113)] = 1
+
+        luv_v_binary = np.zeros_like(luv_v)
+        luv_v_binary[(luv_v >= 180)] = 1
+
+        yuv_u_binary = np.zeros_like(yuv_u)
+        yuv_u_binary[(yuv_u >= 148)] = 1
+
+        yuv_v_binary = np.zeros_like(yuv_v)
+        yuv_v_binary[(yuv_v <= 95)] = 1
+
+        lab_b_avg = int(np.mean(lab_b))
+        lab_boffset = (np.max(lab_b) - lab_b_avg) // 2
+        lab_b_binary = np.zeros_like(lab_b)
+        lab_b_binary[(lab_b >= (lab_b_avg + lab_boffset))] = 1
+
+        hls_s_binary = np.zeros_like(hls_s)
+        rgb_r_binary = np.zeros_like(rgb_r)
+
+        full_mask = np.zeros_like(rgb_r)
+
+        if perceived_brightness < 160:        
+            
+            hls_s_avg_offset = int(np.mean(hls_s)) * 4.5 
+            hls_s_binary[(hls_s >= hls_s_avg_offset)] = 1
+            yuv_v_sum = round((np.asarray(yuv_v_binary).sum()/area) * 1000, 3)
+            hls_s_sum = round((np.asarray(hls_s_binary).sum()/area) * 1000, 3)
+            luv_v_sum = round((np.asarray(luv_u_binary).sum()/area) * 1000, 3)
+            discard_hls = yuv_v_sum > 1 and luv_v_sum > 0 and (hls_s_sum - int(yuv_v_sum) >= 17) and (hls_s_sum - int(luv_v_sum) >= 20)
+
+            rgb_r_binary[(rgb_r >= 210)] = 1
+            discard_rgb = np.asarray(rgb_r_binary).sum()/area > 0.1
+
+            full_mask[(luv_u_binary == 1) | 
+                    (luv_v_binary == 1) |
+                    (yuv_u_binary == 1) |
+                    (yuv_v_binary == 1) |
+                    (lab_b_binary == 1)] = 1
+            
+            full_mask = cv2.morphologyEx(full_mask, cv2.MORPH_GRADIENT, kernel)
+
+            if not discard_hls:
+                full_mask[(hls_s_binary == 1)] = 1
+        else:
+            hls_s_binary[(hls_s >= 200) & (hls_s <= 254)] = 1
+
+            rgb_r_binary[(rgb_r >= 245) & (hls_s <= 250)] = 1
+            discard_rgb = np.asarray(rgb_r_binary).sum()/area > 0.1
+            
+            full_mask[(luv_u_binary == 1) | 
+                      (luv_v_binary == 1) |
+                      (yuv_u_binary == 1) |
+                      (yuv_v_binary == 1) |
+                      (lab_b_binary == 1) |
+                      (hls_s_binary == 1)] = 1
+            
+            full_mask = cv2.morphologyEx(full_mask, cv2.MORPH_GRADIENT, kernel)
+                 
+        if not discard_rgb:
+            full_mask[(rgb_r_binary == 1)] = 1  
+    if debug:
+        return full_mask, (luv_u_binary, luv_v_binary, yuv_u_binary, yuv_v_binary, lab_b_binary, hls_s_binary, rgb_r_binary)
+    else:
+        return full_mask
+
+def pipeline(image_in_rgb, debug=False):
+    """ Experiments
+    """
+    img, M = birds_eye(image_in_rgb)
+    return thresholds(img, debug)
 
 
 def pipeline_test():
     location = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
     dir_to_images = os.path.join(location, 'test_images')
-    dir_to_output_images = os.path.relpath(os.path.join(os.getcwd(), os.path.dirname(__file__), '../output_images/first_pipeline_test/'))
+    dir_to_output_images = os.path.relpath(os.path.join(os.getcwd(), os.path.dirname(__file__), '../output_images/third_pipeline_test/'))
     filenames = os.listdir(dir_to_images)
     def set_axis(row, col, img, title):
         axes[row][col].imshow(img, cmap='gray')
         axes[row][col].set_title(title)
         axes[row][col].axis('off')
     for j in range(0, len(filenames), 4):
-        rows, cols = 4, 11
+        rows, cols = 4, 9
         fig, axes = plt.subplots(rows, cols, figsize=(cols*4, rows*4))
         for i, fname in enumerate(filenames[j:j+4]):
             path_image = os.path.join(dir_to_images, fname)
             img = cv2.cvtColor(cv2.imread(path_image), cv2.COLOR_BGR2RGB)
-            masked, components = pipeline(img)
+            masked, components = pipeline(img, True)
             
             set_axis(i, 0, img, 'ORIGINAL')
-            set_axis(i, 1, components[0], 'HUE')
-            set_axis(i, 2, components[1], 'SATURATION')
-            set_axis(i, 3, components[2], 'LIGHTNESS')
-            set_axis(i, 4, components[3], 'BLUE-YELLOW') 
-            set_axis(i, 5, components[4], 'RED')
-            set_axis(i, 6, components[5], 'X')
-            set_axis(i, 7, components[6], 'Y')
-            set_axis(i, 8, components[7], 'MAGNITUDE')
-            set_axis(i, 9, components[8], 'DIRECTION')
-            set_axis(i, 10, masked, 'FULL MASK')
+            set_axis(i, 1, components[0], 'LUV U')
+            set_axis(i, 2, components[1], 'LUV V')
+            set_axis(i, 3, components[2], 'YUV U') 
+            set_axis(i, 4, components[3], 'YUV V')
+            set_axis(i, 5, components[4], 'LAB B')
+            set_axis(i, 6, components[5], 'HLS S')
+            set_axis(i, 7, components[6], 'RGB R')
+            set_axis(i, 8, masked, 'FULL MASK')
         plt.subplots_adjust(wspace=0.01, hspace=0.5, top=0.95, bottom=0.01, left=0.0, right=1.0)
         filename = 'batch_image_{begin}-{end}.png'.format(begin=str(j+1), end=str(j+4))
         output_image_filename = os.path.join(dir_to_output_images, os.path.splitext(filename)[0])
@@ -379,7 +427,7 @@ def pipeline_test():
 def new_color_spaces_tests():
     location = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
     dir_to_images = os.path.join(location, 'test_images')
-    dir_to_output_images = os.path.relpath(os.path.join(os.getcwd(), os.path.dirname(__file__), '../output_images/moar_color_testing/'))
+    dir_to_output_images = os.path.relpath(os.path.join(os.getcwd(), os.path.dirname(__file__), '../output_images/color_space_tracking/'))
     filenames = os.listdir(dir_to_images)
     def set_axis(row, col, img, title):
         axes[row][col].imshow(img, cmap='gray')
@@ -400,7 +448,7 @@ def new_color_spaces_tests():
     images = sorted(images, key=lambda x: x[1])
     k = 0
     for j in range(0, len(filenames), 4):
-        rows, cols = 4, 9
+        rows, cols = 4, 8
         fig, axes = plt.subplots(rows, cols, figsize=(cols*4, rows*1.5))
         for i, fname in enumerate(filenames[j:j+4]):
             img, Y = images[k]
@@ -408,33 +456,59 @@ def new_color_spaces_tests():
             """ COLOR SPACES TO TEST 
                 RGB2Luv, RGB2XYZ, RGB2YCrCb, RGB2LAB, RGB2HLS 
             """
-            brightness.append(Y)
             luv = cv2.cvtColor(img, cv2.COLOR_RGB2Luv)
             xyz = cv2.cvtColor(img, cv2.COLOR_RGB2XYZ)
             yuv = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
             lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
             hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
             
-            set_axis(i, 0, img, 'ORIGINAL {Luminance}'.format(Luminance=Y))
-            set_axis(i, 1, luv[:,:,1], 'LUV U')
-            set_axis(i, 2, luv[:,:,2], 'LUV V')
-            set_axis(i, 3, xyz[:,:,1], 'XYZ Y')
-            set_axis(i, 4, yuv[:,:,1], 'YUV U')
-            set_axis(i, 5, yuv[:,:,2], 'YUV V')
-            set_axis(i, 6, img[:,:,0], 'R')
-            set_axis(i, 7, lab[:,:,2], 'LAB B')
-            set_axis(i, 8, hls[:,:,2], 'HSL S')
+            
+            l1 = luv[:,:,1]
+            l2 = luv[:,:,2]
+            yz = xyz[:,:,1]
+            yu = yuv[:,:,1]
+            uv = yuv[:,:,2]
+            ri = img[:,:,0]
+            bl = lab[:,:,2]
+            hs = hls[:,:,2]
+
+            set_axis(i, 0, l1, 
+                     'LUV U {Luminance} - {min}-{max} | {AVG}'.format(Luminance=round(Y,0), 
+                                                                      AVG=round(np.mean(l1), 0), 
+                                                                      min=np.min(l1),
+                                                                      max=np.max(l1)))
+            set_axis(i, 1, l2, 'LUV V - {min}-{max} | {AVG}'.format(AVG=round(np.mean(l2), 0), 
+                                                                    min=np.min(l2),
+                                                                    max=np.max(l2)))
+            set_axis(i, 2, yz, 'XYZ Y- {min}-{max} | {AVG}'.format(AVG=round(np.mean(yz), 0), 
+                                                                    min=np.min(yz),
+                                                                    max=np.max(yz)))
+            set_axis(i, 3, yu, 'YUV U- {min}-{max} | {AVG}'.format(AVG=round(np.mean(yu), 0), 
+                                                                    min=np.min(yu),
+                                                                    max=np.max(yu)))
+            set_axis(i, 4, uv, 'YUV V -{min}-{max} | {AVG}'.format(AVG=round(np.mean(uv), 0), 
+                                                                   min=np.min(uv),
+                                                                   max=np.max(uv)))
+            set_axis(i, 5, ri, 'R- {min}-{max} | {AVG}'.format(AVG=round(np.mean(ri), 0), 
+                                                                    min=np.min(ri),
+                                                                    max=np.max(ri)))
+            set_axis(i, 6, bl, 'LAB B- {min}-{max} | {AVG}'.format(AVG=round(np.mean(bl), 0), 
+                                                                    min=np.min(bl),
+                                                                    max=np.max(bl)))
+            set_axis(i, 7, hs, 'HSL S- {min}-{max} | {AVG}'.format(AVG=round(np.mean(hs), 0), 
+                                                                    min=np.min(hs),
+                                                                    max=np.max(hs)))
+
         plt.subplots_adjust(wspace=0.01, hspace=0.2, top=0.95, bottom=0.01, left=0.0, right=1.0)
         filename = 'batch_image_{begin}-{end}.png'.format(begin=str(j+1), end=str(j+4))
         output_image_filename = os.path.join(dir_to_output_images, os.path.splitext(filename)[0])
         plt.savefig(output_image_filename)
         plt.clf()
-    print(sorted(brightness))
         
 
 
 if __name__ == '__main__':
     #search_common_values_brutally()
     #search_common_values_less_brutally()
-    #pipeline_test()
-    new_color_spaces_tests()
+    #new_color_spaces_tests()
+    pipeline_test()
